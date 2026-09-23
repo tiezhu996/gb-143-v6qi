@@ -4,6 +4,27 @@ export interface ServiceTypeWeight {
   name: string;
 }
 
+export interface ServiceTypeWeightVersion {
+  id?: string;
+  type: string;
+  name: string;
+  weight: number;
+  is_active: boolean;
+  version: number;
+  reason?: string;
+  created_by?: string;
+  created_at?: Date;
+}
+
+export interface AdjustServiceTypeWeightInput {
+  type: string;
+  weight?: number;
+  is_active?: boolean;
+  expected_version: number;
+  adminId: string;
+  reason: string;
+}
+
 export const SERVICE_TYPE_WEIGHTS: ServiceTypeWeight[] = [
   { type: 'elderly_care', weight: 1.5, name: '老人陪护' },
   { type: 'child_care', weight: 1.4, name: '儿童关爱' },
@@ -50,6 +71,8 @@ export interface ServiceRecord {
   rating: number;
   points_earned?: number;
   is_no_show?: boolean;
+  weight?: number | string;
+  weight_version?: number;
   location?: string;
   description?: string;
   recorded_at?: Date;
@@ -173,6 +196,7 @@ export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  code?: string;
   message?: string;
   details?: any;
 }

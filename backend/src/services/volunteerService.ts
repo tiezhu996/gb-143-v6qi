@@ -1,10 +1,18 @@
 import { Volunteer, ServiceRecord, PointsLog, ApiResponse, CreateServiceRecordResult } from '../types';
 import pool from '../db/pool';
-import { calculatePoints, calculateNoShowPenalty } from './pointsCalculator';
+import { calculatePoints, calculateNoShowPenalty, resolveRecordWeight, resolveRecordWeightVersion } from './pointsCalculator';
 import { calculateLevel, checkNewBadges } from './badgeService';
 import { logCreditChange, isCreditLimited, CREDIT_LIMIT_THRESHOLD, recalculateCreditScore } from './creditService';
+import { findActiveTypeInTransaction } from './serviceTypeWeightService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
+
+// 统一在记录上附带当时使用的权重与版本号，历史记录回退到初始第 1 版权重
+const withWeightSnapshot = (record: any): any => ({
+  ...record,
+  weight: resolveRecordWeight(record),
+  weight_version: resolveRecordWeightVersion(record),
+});
 
 export const createServiceRecord = async (record: ServiceRecord): Promise<ApiResponse<CreateServiceRecordResult>> => {
   const client = await pool.connect();
@@ -37,16 +45,38 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
       };
     }
 
+    // 新记录一律使用当前生效版本；未知或已停用类型直接拒绝并返回类型
+    const currentType = await findActiveTypeInTransaction(client, record.service_type);
+
+    if (!currentType) {
+      await client.query('ROLLBACK');
+      return {
+        success: false,
+        error: messages.serviceTypes.notFound,
+        details: { service_type: record.service_type },
+      };
+    }
+
+    if (!currentType.is_active) {
+      await client.query('ROLLBACK');
+      return {
+        success: false,
+        error: messages.serviceTypes.typeDisabled(record.service_type),
+        details: { service_type: record.service_type, weight_version: currentType.version },
+      };
+    }
+
     const pointsEarned = record.is_no_show ? 0 : calculatePoints(
       record.duration_hours,
       record.service_type,
-      record.rating
+      record.rating,
+      currentType.weight
     );
 
     const insertResult = await client.query(
       `INSERT INTO service_records
-       (volunteer_id, service_type, duration_hours, rating, points_earned, is_no_show, location, description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (volunteer_id, service_type, duration_hours, rating, points_earned, is_no_show, weight, weight_version, location, description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         record.volunteer_id,
@@ -55,12 +85,14 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         record.rating,
         pointsEarned,
         record.is_no_show || false,
+        currentType.weight,
+        currentType.version,
         record.location,
         record.description,
       ]
     );
 
-    const newRecord = insertResult.rows[0];
+    const newRecord = withWeightSnapshot(insertResult.rows[0]);
 
     let pointsChange = pointsEarned;
     if (record.is_no_show) {
@@ -156,7 +188,14 @@ export const batchCreateServiceRecords = async (
       results.push(result.data);
     } else {
       failCount++;
-      results.push({ error: result.error, record });
+      // 失败明细带回服务类型，便于批量导入定位被停用/未知类型
+      results.push({
+        error: result.error,
+        code: result.code,
+        service_type: record.service_type,
+        details: result.details,
+        record,
+      });
     }
   }
 
@@ -197,7 +236,7 @@ export const getVolunteerServiceRecords = async (
     return {
       success: true,
       data: {
-        records: recordsResult.rows,
+        records: recordsResult.rows.map(withWeightSnapshot),
         pagination: {
           page,
           page_size: pageSize,
@@ -226,7 +265,7 @@ export const getServiceRecordById = async (
       return { success: false, error: messages.volunteers.serviceRecordNotFound };
     }
 
-    return { success: true, data: result.rows[0] };
+    return { success: true, data: withWeightSnapshot(result.rows[0]) };
   } finally {
     client.release();
   }

@@ -1,11 +1,17 @@
 import { Router, Response } from 'express';
-import { validateRequest, validateQuery, adjustPointsSchema, adjustCreditSchema, paginationSchema } from '../middleware/validator';
+import { validateRequest, validateQuery, adjustPointsSchema, adjustCreditSchema, serviceTypeWeightSchema, paginationSchema } from '../middleware/validator';
 import {
   adjustPoints,
   adjustCreditScore,
   getAdminAuditLogs,
   setVolunteerStatus,
 } from '../services/adminService';
+import {
+  getCurrentServiceTypeWeights,
+  getServiceTypeWeightHistory,
+  adjustServiceTypeWeight,
+  TYPE_VERSION_CONFLICT,
+} from '../services/serviceTypeWeightService';
 import { AuthRequest, requireAdmin } from '../middleware/auth';
 import { messages } from '../constants/messages';
 import { sendBadRequest, sendInternalError } from '../utils/httpResponses';
@@ -73,6 +79,53 @@ router.patch('/volunteers/:id/status', async (req: AuthRequest, res: Response) =
     res.status(statusCode).json(result);
   } catch (error) {
     sendInternalError(res, error, 'Error setting volunteer status');
+  }
+});
+
+router.get('/service-types/weights', async (_req: AuthRequest, res: Response) => {
+  try {
+    const result = await getCurrentServiceTypeWeights();
+    res.status(200).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error getting service type weights');
+  }
+});
+
+router.get('/service-types/:type/versions', async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await getServiceTypeWeightHistory(req.params.type);
+    const statusCode = result.success ? 200 : 404;
+    res.status(statusCode).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error getting service type versions');
+  }
+});
+
+router.put('/service-types/weights', validateRequest(serviceTypeWeightSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    if (req.body.weight === undefined && req.body.is_active === undefined) {
+      sendBadRequest(res, messages.validation.weightAdjustFieldsRequired);
+      return;
+    }
+
+    const adminId = req.user?.id || 'admin';
+    const result = await adjustServiceTypeWeight({
+      type: req.body.type,
+      weight: req.body.weight,
+      is_active: req.body.is_active,
+      expected_version: req.body.expected_version,
+      adminId,
+      reason: req.body.reason,
+    });
+
+    if (!result.success) {
+      res.status(result.code === TYPE_VERSION_CONFLICT ? 409 : 400).json(result);
+      return;
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error adjusting service type weight');
   }
 });
 

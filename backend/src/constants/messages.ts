@@ -11,6 +11,7 @@ export const messages = {
     activeFlagRequired: 'is_active 必须是布尔值',
     volunteerIdRequired: '缺少志愿者ID',
     dateRangeRequired: '缺少日期参数',
+    weightAdjustFieldsRequired: 'weight 或 is_active 至少提供一项',
   },
   errors: {
     internal: '服务器内部错误',
@@ -43,6 +44,15 @@ export const messages = {
     serviceRecordDeleted: '记录已删除',
     serviceRecordDeleteFailed: '删除记录失败',
   },
+  serviceTypes: {
+    notFound: '服务类型不存在',
+    typeDisabled: (serviceType: string) => `服务类型 ${serviceType} 已停用，暂不接受新的服务记录`,
+    versionConflict: (serviceType: string, expected: number, current: number) =>
+      `服务类型 ${serviceType} 权重版本冲突：当前版本为 ${current}，提交基于版本 ${expected}，请刷新后重试`,
+    noChange: '权重或停用状态未发生变化，无需生成新版本',
+    queryFailed: '查询服务类型权重失败',
+    adjustFailed: '调整服务类型权重失败',
+  },
   complaints: {
     notFound: '投诉不存在',
     alreadyHandled: '该投诉已处理',
@@ -63,5 +73,6 @@ export const messages = {
     adjustPointsFailed: '调整积分失败',
     adjustCreditFailed: '调整信用分失败',
     setVolunteerStatusFailed: '设置志愿者状态失败',
+    adjustServiceTypeWeightFailed: '调整服务类型权重失败',
   },
 };

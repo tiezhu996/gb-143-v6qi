@@ -1,6 +1,7 @@
 import pool from './pool';
 import { messages } from '../constants/messages';
 import { logger } from '../utils/logger';
+import { SERVICE_TYPE_WEIGHTS } from '../types';
 
 const createTables = async (): Promise<void> => {
   const client = await pool.connect();
@@ -38,6 +39,8 @@ const createTables = async (): Promise<void> => {
         rating INTEGER NOT NULL DEFAULT 5 CHECK (rating >= 1 AND rating <= 5),
         points_earned INTEGER NOT NULL DEFAULT 0,
         is_no_show BOOLEAN NOT NULL DEFAULT false,
+        weight DECIMAL(4,2),
+        weight_version INTEGER,
         location VARCHAR(200),
         description TEXT,
         recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -49,6 +52,44 @@ const createTables = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_service_records_recorded_at ON service_records(recorded_at DESC);
       CREATE INDEX IF NOT EXISTS idx_service_records_service_type ON service_records(service_type);
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS service_type_weight_versions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        type VARCHAR(50) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        weight DECIMAL(4,2) NOT NULL CHECK (weight > 0 AND weight <= 10),
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        version INTEGER NOT NULL,
+        reason TEXT,
+        created_by VARCHAR(100) NOT NULL DEFAULT 'system',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(type, version)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_service_type_versions_type
+        ON service_type_weight_versions(type, version DESC);
+    `);
+
+    // 旧服务记录补列：权重快照与版本号仅对新记录写入，历史数据保持不重算
+    await client.query(
+      `ALTER TABLE service_records
+       ADD COLUMN IF NOT EXISTS weight DECIMAL(4,2)`
+    );
+    await client.query(
+      `ALTER TABLE service_records
+       ADD COLUMN IF NOT EXISTS weight_version INTEGER`
+    );
+
+    // 初始化各服务类型的第 1 版权重（与既有静态配置一致），已初始化则跳过
+    for (const typeConfig of SERVICE_TYPE_WEIGHTS) {
+      await client.query(
+        `INSERT INTO service_type_weight_versions (type, name, weight, is_active, version, reason, created_by)
+         VALUES ($1, $2, $3, true, 1, '初始版本', 'system')
+         ON CONFLICT (type, version) DO NOTHING`,
+        [typeConfig.type, typeConfig.name, typeConfig.weight]
+      );
+    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS badges (

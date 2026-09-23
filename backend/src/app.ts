@@ -9,6 +9,7 @@ import { authMiddleware } from './middleware/auth';
 import { env } from './config/env';
 import { messages } from './constants/messages';
 import { badgeLevels, serviceRules, serviceTypes } from './constants/serviceConfig';
+import { getCurrentServiceTypeWeights } from './services/serviceTypeWeightService';
 import { logger } from './utils/logger';
 
 const app = express();
@@ -35,11 +36,22 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/v1/service-types', (req: Request, res: Response) => {
+app.get('/api/v1/service-types', async (_req: Request, res: Response) => {
+  // 当前生效版本来自数据库（含管理员调整与停用状态）；不可用时回退静态配置
+  let currentTypes: unknown = serviceTypes;
+  try {
+    const current = await getCurrentServiceTypeWeights();
+    if (current.success && current.data && current.data.length > 0) {
+      currentTypes = current.data;
+    }
+  } catch (error) {
+    logger.error(messages.serviceTypes.queryFailed, error);
+  }
+
   res.json({
     success: true,
     data: {
-      serviceTypes,
+      serviceTypes: currentTypes,
       badgeLevels,
       pointsPerHour: serviceRules.pointsPerHour,
       creditLimitThreshold: serviceRules.creditLimitThreshold,

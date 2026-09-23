@@ -96,6 +96,18 @@ export const adjustCreditSchema = Joi.object({
   reason: Joi.string().min(5).required(),
 });
 
+export const serviceTypeWeightSchema = Joi.object({
+  type: Joi.string().valid(
+    'elderly_care', 'child_care', 'medical_assist', 'education',
+    'community_service', 'disaster_relief', 'environmental',
+    'cultural_activity', 'other'
+  ).required(),
+  weight: Joi.number().positive().max(10).precision(2).optional(),
+  is_active: Joi.boolean().optional(),
+  expected_version: Joi.number().integer().min(1).required(),
+  reason: Joi.string().min(2).required(),
+});
+
 export const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   page_size: Joi.number().integer().min(1).max(100).default(20),
