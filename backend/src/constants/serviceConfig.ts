@@ -41,4 +41,6 @@ export const apiEndpoints = [
   'POST /api/v1/complaints/:id/handle - 处理投诉',
   'POST /api/v1/admin/adjust-points - 调整积分',
   'POST /api/v1/admin/adjust-credit - 调整信用分',
+  'GET  /api/v1/admin/service-types - 服务类型权重版本列表（管理员）',
+  'PUT  /api/v1/admin/service-types/:type/weight - 调整类型每小时积分权重或停用类型（按版本号）',
 ];

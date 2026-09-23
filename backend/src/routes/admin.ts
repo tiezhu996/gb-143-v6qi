@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
-import { validateRequest, validateQuery, adjustPointsSchema, adjustCreditSchema, paginationSchema } from '../middleware/validator';
+import { validateRequest, validateQuery, adjustPointsSchema, adjustCreditSchema, adjustServiceTypeWeightSchema, paginationSchema } from '../middleware/validator';
 import {
   adjustPoints,
   adjustCreditScore,
   getAdminAuditLogs,
   setVolunteerStatus,
 } from '../services/adminService';
+import { getServiceTypes, adjustServiceTypeWeight } from '../services/serviceTypeService';
 import { AuthRequest, requireAdmin } from '../middleware/auth';
 import { messages } from '../constants/messages';
 import { sendBadRequest, sendInternalError } from '../utils/httpResponses';
@@ -13,6 +14,37 @@ import { sendBadRequest, sendInternalError } from '../utils/httpResponses';
 const router = Router();
 
 router.use(requireAdmin);
+
+router.get('/service-types', async (_req: AuthRequest, res: Response) => {
+  try {
+    const result = await getServiceTypes(true);
+    res.status(200).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error getting service type weights');
+  }
+});
+
+router.put('/service-types/:type/weight', validateRequest(adjustServiceTypeWeightSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const adminId = req.user?.id || 'admin';
+    const result = await adjustServiceTypeWeight(
+      req.params.type,
+      { weight: req.body.weight, isActive: req.body.is_active },
+      req.body.expected_version,
+      adminId,
+      req.body.reason
+    );
+    let statusCode = 400;
+    if (result.success) {
+      statusCode = 200;
+    } else if ((result.details as any)?.code === 'VERSION_CONFLICT') {
+      statusCode = 409;
+    }
+    res.status(statusCode).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error adjusting service type weight');
+  }
+});
 
 router.post('/adjust-points', validateRequest(adjustPointsSchema), async (req: AuthRequest, res: Response) => {
   try {

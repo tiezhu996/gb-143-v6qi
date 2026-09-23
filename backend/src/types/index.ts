@@ -4,6 +4,13 @@ export interface ServiceTypeWeight {
   name: string;
 }
 
+export interface ServiceTypeConfig extends ServiceTypeWeight {
+  is_active: boolean;
+  version: number;
+  updated_by?: string;
+  updated_at?: Date;
+}
+
 export const SERVICE_TYPE_WEIGHTS: ServiceTypeWeight[] = [
   { type: 'elderly_care', weight: 1.5, name: '老人陪护' },
   { type: 'child_care', weight: 1.4, name: '儿童关爱' },
@@ -15,6 +22,11 @@ export const SERVICE_TYPE_WEIGHTS: ServiceTypeWeight[] = [
   { type: 'cultural_activity', weight: 1.0, name: '文化活动' },
   { type: 'other', weight: 1.0, name: '其他服务' },
 ];
+
+export const MIN_SERVICE_TYPE_WEIGHT = 0.1;
+export const MAX_SERVICE_TYPE_WEIGHT = 10;
+// 初始版本号：服务类型权重版本从 1 开始，每次成功调整递增一次
+export const INITIAL_WEIGHT_VERSION = 1;
 
 export const POINTS_PER_HOUR = 10;
 
@@ -52,6 +64,9 @@ export interface ServiceRecord {
   is_no_show?: boolean;
   location?: string;
   description?: string;
+  // 提交时该类型的积分权重快照与权重版本，后续类型调整不影响已落库记录
+  weight_snapshot?: number;
+  weight_version?: number;
   recorded_at?: Date;
   created_at?: Date;
   updated_at?: Date;
@@ -158,6 +173,8 @@ export interface CreateServiceRecordResult {
   newLevel: number;
   newBadges: any[];
   levelUp: boolean;
+  weightSnapshot: number;
+  weightVersion: number;
   creditScore: number;
   creditChange: number;
   creditBreakdown?: CreditCalculationBreakdown;

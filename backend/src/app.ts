@@ -8,7 +8,8 @@ import adminRoutes from './routes/admin';
 import { authMiddleware } from './middleware/auth';
 import { env } from './config/env';
 import { messages } from './constants/messages';
-import { badgeLevels, serviceRules, serviceTypes } from './constants/serviceConfig';
+import { badgeLevels, serviceRules } from './constants/serviceConfig';
+import { getServiceTypes } from './services/serviceTypeService';
 import { logger } from './utils/logger';
 
 const app = express();
@@ -35,16 +36,27 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/v1/service-types', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    data: {
-      serviceTypes,
-      badgeLevels,
-      pointsPerHour: serviceRules.pointsPerHour,
-      creditLimitThreshold: serviceRules.creditLimitThreshold,
-    },
-  });
+app.get('/api/v1/service-types', async (_req: Request, res: Response) => {
+  try {
+    // 返回服务类型权重的当前版本；停用类型也展示，便于管理员与志愿者识别
+    const result = await getServiceTypes(true);
+    res.json({
+      success: true,
+      data: {
+        serviceTypes: result.data?.serviceTypes ?? [],
+        currentVersion: result.data?.currentVersion ?? {},
+        badgeLevels,
+        pointsPerHour: serviceRules.pointsPerHour,
+        creditLimitThreshold: serviceRules.creditLimitThreshold,
+      },
+    });
+  } catch (error) {
+    logger.error(messages.errors.unhandled, error);
+    res.status(500).json({
+      success: false,
+      error: messages.errors.internal,
+    });
+  }
 });
 
 app.use('/api/v1/volunteers', authMiddleware, volunteerRoutes);

@@ -1,6 +1,12 @@
 import pool from './pool';
 import { messages } from '../constants/messages';
 import { logger } from '../utils/logger';
+import {
+  SERVICE_TYPE_WEIGHTS,
+  INITIAL_WEIGHT_VERSION,
+  MIN_SERVICE_TYPE_WEIGHT,
+  MAX_SERVICE_TYPE_WEIGHT,
+} from '../types';
 
 const createTables = async (): Promise<void> => {
   const client = await pool.connect();
@@ -48,6 +54,24 @@ const createTables = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_service_records_volunteer_id ON service_records(volunteer_id);
       CREATE INDEX IF NOT EXISTS idx_service_records_recorded_at ON service_records(recorded_at DESC);
       CREATE INDEX IF NOT EXISTS idx_service_records_service_type ON service_records(service_type);
+
+      ALTER TABLE service_records
+        ADD COLUMN IF NOT EXISTS weight_snapshot DECIMAL(4,2),
+        ADD COLUMN IF NOT EXISTS weight_version INTEGER;
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS service_type_weights (
+        type VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        weight DECIMAL(4,2) NOT NULL
+          CHECK (weight >= ${MIN_SERVICE_TYPE_WEIGHT} AND weight <= ${MAX_SERVICE_TYPE_WEIGHT}),
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        version INTEGER NOT NULL DEFAULT ${INITIAL_WEIGHT_VERSION},
+        updated_by VARCHAR(100),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     await client.query(`
@@ -119,6 +143,12 @@ const createTables = async (): Promise<void> => {
     `);
 
     await client.query(`
+      ALTER TABLE points_logs
+        ADD COLUMN IF NOT EXISTS weight_snapshot DECIMAL(4,2),
+        ADD COLUMN IF NOT EXISTS weight_version INTEGER;
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS admin_audit_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         admin_id VARCHAR(100) NOT NULL,
@@ -151,6 +181,11 @@ const createTables = async (): Promise<void> => {
       DROP TRIGGER IF EXISTS update_service_records_updated_at ON service_records;
       CREATE TRIGGER update_service_records_updated_at
         BEFORE UPDATE ON service_records
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+      DROP TRIGGER IF EXISTS update_service_type_weights_updated_at ON service_type_weights;
+      CREATE TRIGGER update_service_type_weights_updated_at
+        BEFORE UPDATE ON service_type_weights
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     `);
 
@@ -197,4 +232,52 @@ const seedData = async (): Promise<void> => {
   }
 };
 
-export { createTables, seedData };
+// 初始化服务类型权重版本，并给版本化之前产生的历史记录补齐当时权重快照。
+// 仅写入快照列，不触碰 points_earned、积分、等级、徽章或信用分，因此不构成重算。
+const seedServiceTypeWeights = async (): Promise<void> => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const item of SERVICE_TYPE_WEIGHTS) {
+      await client.query(
+        `INSERT INTO service_type_weights (type, name, weight, is_active, version)
+         VALUES ($1, $2, $3, true, $4)
+         ON CONFLICT (type) DO NOTHING`,
+        [item.type, item.name, item.weight, INITIAL_WEIGHT_VERSION]
+      );
+    }
+
+    // 历史服务记录按类型的初始默认权重回填快照，version 标记为 0 表示版本化之前的记录
+    for (const item of SERVICE_TYPE_WEIGHTS) {
+      await client.query(
+        `UPDATE service_records
+         SET weight_snapshot = $1, weight_version = 0
+         WHERE service_type = $2 AND weight_snapshot IS NULL`,
+        [item.weight, item.type]
+      );
+    }
+
+    // 旧积分明细通过关联服务记录显示当时权重，保持“旧明细仍显示当时权重”
+    await client.query(
+      `UPDATE points_logs
+       SET weight_snapshot = sr.weight_snapshot,
+           weight_version = sr.weight_version
+       FROM service_records sr
+       WHERE points_logs.related_type = 'service_record'
+         AND points_logs.related_id = sr.id
+         AND points_logs.weight_snapshot IS NULL`
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error(messages.errors.seedServiceTypesFailed, error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export { createTables, seedData, seedServiceTypeWeights };

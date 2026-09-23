@@ -25,6 +25,7 @@ export const messages = {
     seedStarting: 'Seeding initial data...',
     seedCreated: 'Initial seed data created.',
     seedFailed: 'Failed to seed data',
+    seedServiceTypesFailed: 'Failed to seed service type weights',
   },
   service: {
     title: '志愿者积分与信用评估系统',
@@ -56,6 +57,14 @@ export const messages = {
     operationFailed: '操作失败',
     statusChanged: (isActive: boolean) => `志愿者已${isActive ? '启用' : '停用'}`,
   },
+  serviceTypes: {
+    notFound: '服务类型不存在',
+    disabled: (type: string) => `服务类型「${type}」已停用，不能提交该类型的服务记录`,
+    versionConflict: (type: string, expected: number, current: number) =>
+      `服务类型「${type}」权重版本已变更（提交版本 ${expected}，当前版本 ${current}），请刷新后重试`,
+    noFieldsToUpdate: '至少需要提供 weight 或 is_active 之一',
+    adjustFailed: '调整服务类型权重失败',
+  },
   logs: {
     createServiceRecordFailed: '创建服务记录失败',
     deleteServiceRecordFailed: '删除服务记录失败',
@@ -63,5 +72,6 @@ export const messages = {
     adjustPointsFailed: '调整积分失败',
     adjustCreditFailed: '调整信用分失败',
     setVolunteerStatusFailed: '设置志愿者状态失败',
+    adjustServiceTypeFailed: '调整服务类型权重失败',
   },
 };

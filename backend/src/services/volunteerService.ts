@@ -3,6 +3,7 @@ import pool from '../db/pool';
 import { calculatePoints, calculateNoShowPenalty } from './pointsCalculator';
 import { calculateLevel, checkNewBadges } from './badgeService';
 import { logCreditChange, isCreditLimited, CREDIT_LIMIT_THRESHOLD, recalculateCreditScore } from './creditService';
+import { getActiveServiceType } from './serviceTypeService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
 
@@ -24,6 +25,23 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
 
     const volunteer = volunteerResult.rows[0] as Volunteer;
 
+    // 提交时锁定该类型的当前权重版本：类型停用（含批量导入）一律拒绝并返回类型
+    const typeCheck = await getActiveServiceType(client, record.service_type);
+    if (!typeCheck.success || !typeCheck.serviceType) {
+      await client.query('ROLLBACK');
+      return {
+        success: false,
+        error: typeCheck.error,
+        details: {
+          service_type: record.service_type,
+          service_type_name: typeCheck.serviceType?.name,
+          is_active: typeCheck.serviceType?.is_active ?? false,
+        },
+      };
+    }
+
+    const activeServiceType = typeCheck.serviceType;
+
     if (isCreditLimited(volunteer.credit_score)) {
       await client.query('ROLLBACK');
       return {
@@ -40,13 +58,15 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
     const pointsEarned = record.is_no_show ? 0 : calculatePoints(
       record.duration_hours,
       record.service_type,
-      record.rating
+      record.rating,
+      activeServiceType.weight
     );
 
     const insertResult = await client.query(
       `INSERT INTO service_records
-       (volunteer_id, service_type, duration_hours, rating, points_earned, is_no_show, location, description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (volunteer_id, service_type, duration_hours, rating, points_earned, is_no_show, location, description,
+        weight_snapshot, weight_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         record.volunteer_id,
@@ -57,6 +77,8 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         record.is_no_show || false,
         record.location,
         record.description,
+        activeServiceType.weight,
+        activeServiceType.version,
       ]
     );
 
@@ -82,8 +104,9 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
     );
 
     await client.query(
-      `INSERT INTO points_logs (volunteer_id, change_amount, reason, before_points, after_points, related_id, related_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO points_logs (volunteer_id, change_amount, reason, before_points, after_points, related_id, related_type,
+        weight_snapshot, weight_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         volunteer.id,
         pointsChange,
@@ -92,6 +115,8 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         newTotalPoints,
         newRecord.id,
         'service_record',
+        activeServiceType.weight,
+        activeServiceType.version,
       ]
     );
 
@@ -128,6 +153,8 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         newLevel,
         newBadges,
         levelUp: newLevel > oldLevel,
+        weightSnapshot: activeServiceType.weight,
+        weightVersion: activeServiceType.version,
         creditScore: creditResult ? creditResult.afterScore : volunteer.credit_score,
         creditChange: creditResult ? creditResult.changeAmount : 0,
         creditBreakdown: creditResult?.breakdown,
@@ -156,7 +183,13 @@ export const batchCreateServiceRecords = async (
       results.push(result.data);
     } else {
       failCount++;
-      results.push({ error: result.error, record });
+      // 停用类型等拒绝结果必须带类型，批量结果里同样返回 service_type
+      results.push({
+        error: result.error,
+        service_type: record.service_type,
+        details: result.details,
+        record,
+      });
     }
   }
 

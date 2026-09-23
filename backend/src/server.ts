@@ -2,13 +2,14 @@ import app from './app';
 import { env } from './config/env';
 import { messages } from './constants/messages';
 import { apiEndpoints } from './constants/serviceConfig';
-import { createTables, seedData } from './db/migrate';
+import { createTables, seedData, seedServiceTypeWeights } from './db/migrate';
 import { logger } from './utils/logger';
 
 const startServer = async (): Promise<void> => {
   try {
     logger.info(messages.errors.databaseInitializing);
     await createTables();
+    await seedServiceTypeWeights();
     await seedData();
     logger.info(messages.errors.databaseInitialized);
 

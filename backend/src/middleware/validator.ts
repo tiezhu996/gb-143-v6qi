@@ -96,6 +96,13 @@ export const adjustCreditSchema = Joi.object({
   reason: Joi.string().min(5).required(),
 });
 
+export const adjustServiceTypeWeightSchema = Joi.object({
+  weight: Joi.number().min(0.1).max(10).optional(),
+  is_active: Joi.boolean().optional(),
+  expected_version: Joi.number().integer().min(1).required(),
+  reason: Joi.string().min(2).max(200).default('管理员调整服务类型权重'),
+}).min(2); // expected_version 必填外，weight / is_active 至少提供一个
+
 export const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   page_size: Joi.number().integer().min(1).max(100).default(20),
